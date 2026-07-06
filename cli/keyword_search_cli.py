@@ -1,8 +1,9 @@
 import argparse
 import json
 import string
+from collections import Counter
 from nltk.stem import PorterStemmer
-from pickle import dump
+from pickle import dump, load
 import os
 
 def main() -> None:
@@ -41,6 +42,12 @@ def main() -> None:
             result.append(stemmer.stem(token))
         return result
 
+    def tokenize_term(term):
+        token = preprocess(term)
+        if len(token) != 1:
+            raise ValueError('Length of token not 1')
+        return token[0]
+
     def load_movies():
         with open('./data/movies.json', 'r') as file:
             data = json.load(file)
@@ -55,19 +62,32 @@ def main() -> None:
         def __init__(self):
             self.index = {}
             self.docmap = {}
+            self.term_frequencies = {}
+
     
         def __add_document(self, doc_id, text):
             tokenized_text = preprocess(text)
+            self.term_frequencies[doc_id] = Counter()
             for token in tokenized_text:
                 if token in self.index:
                     self.index[token].add(doc_id)
                 else:
                     self.index[token] = {doc_id}
+                self.term_frequencies[doc_id][token] += 1
 
         def get_documents(self, term):
-            res = []
-            document_ids = self.index[term]
+            try:
+                document_ids = self.index[term]
+            except KeyError:
+                return []
             return sorted(document_ids)
+
+        def get_tf(self, doc_id, term):
+            try:
+                freq = self.term_frequencies[doc_id][term]
+                return freq
+            except KeyError:
+                return 0
 
         def build(self):
             data = load_movies()
@@ -81,10 +101,27 @@ def main() -> None:
             os.makedirs('cache', exist_ok=True)
             index_file_path = "cache/index.pkl"
             docmap_file_path = "cache/docmap.pkl"
+            term_frequencies_file_path = "cache/term_frequencies.pkl"
             with open (index_file_path, 'wb') as file:
                 dump(self.index, file)
             with open (docmap_file_path, 'wb') as file:
-                dump(self.docmap, file)   
+                dump(self.docmap, file)
+            with open(term_frequencies_file_path, 'wb') as file:
+                dump(self.term_frequencies, file)  
+
+        def load_from_cache(self):
+            index_file_path = "cache/index.pkl"
+            docmap_file_path = "cache/docmap.pkl"
+            term_frequencies_path = "cache/term_frequencies.pkl"
+            with open(index_file_path, 'rb') as file:
+                index = load(file)
+                self.index = index
+            with open(docmap_file_path, 'rb') as file:
+                docmap = load(file)
+                self.docmap = docmap
+            with open(term_frequencies_path, 'rb') as file:
+                term_frequencies = load(file)
+                self.term_frequencies = term_frequencies
 
     results = []
     parser = argparse.ArgumentParser(description="Keyword Search CLI")
@@ -94,42 +131,47 @@ def main() -> None:
     search_parser.add_argument("query", type=str, help="Search query")
 
     build_parser = subparsers.add_parser("build", help="Build Inverted Index from movies")
+
+    tf_parser = subparsers.add_parser("tf", help="Return term frequencies")
+    tf_parser.add_argument("id", type=int, help="Document id")
+    tf_parser.add_argument("term", type=str, help="Inputted term")
     
     args = parser.parse_args()
     
-    data = load_movies()
+    InvIdx = InvertedIndex()
     stopwords = load_stopwords()
     
     match args.command:
         case "search":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return            
             stopwords = process_stopwords(stopwords)
             query_tokens = preprocess(args.query)
-            movies = next(iter(data.values()), None)
-            result = 1
-            for item in movies:
-                if result == 6:
-                    break
-                title_tokens = preprocess(item["title"])
-                matched = False
-                for query_token in query_tokens:
-                    if matched:
-                        break
-                    for title_token in title_tokens:                        
-                        if query_token in title_token:
-                            matched = True
-                            break
-                if matched:
-                    print(f'{result}. {item["title"]} {result}')
-                    result += 1
+            doc_ids = []
+            for query_token in query_tokens:
+                ids = InvIdx.get_documents(query_token)
+                doc_ids.extend(ids)
+            for i, id in enumerate(doc_ids[:5]):
+                movie = InvIdx.docmap[id]
+                print(f'{movie['id']} {movie['title']}')
         case "build":
-            InvIdx = InvertedIndex()
             InvIdx.build()
             InvIdx.save()
-            docs = InvIdx.get_documents("merida")
-            print(f"First document for the token 'merida' = {docs[0]}")
+        case "tf":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return  
+            term = tokenize_term(args.term)
+            tf = InvIdx.get_tf(args.id, term)
+            print(f'{args.term} {tf} {args.id}')
+            
         case _:
             parser.print_help()
-
 
 
 if __name__ == "__main__":
