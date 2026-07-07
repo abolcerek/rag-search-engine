@@ -1,6 +1,8 @@
 import argparse
 import json
 import string
+import math
+import config
 from collections import Counter
 from nltk.stem import PorterStemmer
 from pickle import dump, load
@@ -63,6 +65,7 @@ def main() -> None:
             self.index = {}
             self.docmap = {}
             self.term_frequencies = {}
+            self.doc_lengths = {}
 
     
         def __add_document(self, doc_id, text):
@@ -74,6 +77,7 @@ def main() -> None:
                 else:
                     self.index[token] = {doc_id}
                 self.term_frequencies[doc_id][token] += 1
+            self.doc_lengths[doc_id] = len(tokenized_text)
 
         def get_documents(self, term):
             try:
@@ -89,6 +93,26 @@ def main() -> None:
             except KeyError:
                 return 0
 
+        def get_bm25_idf(self, term: str) -> float:
+            doc_ids = self.get_documents(term)
+            score = math.log((len(self.docmap) - len(doc_ids) + 0.5) / (len(doc_ids) + 0.5) + 1)
+            return score
+
+        def get_bm25_tf(self, doc_id, term, k1=config.BM_K1, b=config.BM25_B):
+            length_norm = 1 - b + b * (self.doc_lengths[doc_id] / self.__get_avg_doc_length())
+            tf = self.get_tf(doc_id, term)
+            bm_25tf = (tf * (k1 + 1) / (tf + k1 * length_norm))
+            return bm_25tf
+
+        def __get_avg_doc_length(self) -> float:
+            if len(self.doc_lengths) == 0:
+                return 0.0
+            doc_length = 0 
+            for doc in self.doc_lengths:
+                doc_length += self.doc_lengths[doc]            
+            return doc_length/len(self.doc_lengths)
+
+
         def build(self):
             data = load_movies()
             movies = next(iter(data.values()), None)
@@ -102,17 +126,21 @@ def main() -> None:
             index_file_path = "cache/index.pkl"
             docmap_file_path = "cache/docmap.pkl"
             term_frequencies_file_path = "cache/term_frequencies.pkl"
+            doc_lengths_path = "cache/doc_lengths.pkl"
             with open (index_file_path, 'wb') as file:
                 dump(self.index, file)
             with open (docmap_file_path, 'wb') as file:
                 dump(self.docmap, file)
             with open(term_frequencies_file_path, 'wb') as file:
                 dump(self.term_frequencies, file)  
+            with open(doc_lengths_path, 'wb') as file:
+                dump(self.doc_lengths, file)
 
         def load_from_cache(self):
             index_file_path = "cache/index.pkl"
             docmap_file_path = "cache/docmap.pkl"
             term_frequencies_path = "cache/term_frequencies.pkl"
+            doc_lengths_path = "cache/doc_lengths.pkl"
             with open(index_file_path, 'rb') as file:
                 index = load(file)
                 self.index = index
@@ -122,6 +150,10 @@ def main() -> None:
             with open(term_frequencies_path, 'rb') as file:
                 term_frequencies = load(file)
                 self.term_frequencies = term_frequencies
+            with open(doc_lengths_path, 'rb') as file:
+                doc_length = load(file)
+                self.doc_lengths = doc_length
+
 
     results = []
     parser = argparse.ArgumentParser(description="Keyword Search CLI")
@@ -135,7 +167,23 @@ def main() -> None:
     tf_parser = subparsers.add_parser("tf", help="Return term frequencies")
     tf_parser.add_argument("id", type=int, help="Document id")
     tf_parser.add_argument("term", type=str, help="Inputted term")
-    
+
+    idf_parser = subparsers.add_parser("idf", help="Get idf value for term")
+    idf_parser.add_argument("term", type=str, help="Inputted term")
+
+    tfidf_parser = subparsers.add_parser("tfidf", help="Get TF-IDF score for a given term")
+    tfidf_parser.add_argument("id", type=int, help="Inputted doc id")
+    tfidf_parser.add_argument("term", type=str, help="Inputted term")
+
+    bm25_idf_parser = subparsers.add_parser("bm25idf", help="Get BM25 IDF score for a given term")
+    bm25_idf_parser.add_argument("term", type=str, help="Term to get BM25 IDF score for")
+
+    bm25_tf_parser = subparsers.add_parser("bm25tf", help="Get BM25 TF score for a given document ID and term")
+    bm25_tf_parser.add_argument("id", type=int, help="Document ID")
+    bm25_tf_parser.add_argument("term", type=str, help="Term to get BM25 TF score for")
+    bm25_tf_parser.add_argument("k1", type=float, nargs='?', default=config.BM_K1, help="Tunable BM25 K1 parameter")
+    bm25_tf_parser.add_argument("b", type=float, nargs='?', default=config.BM25_B, help="Tunable BM25 b parameter")
+
     args = parser.parse_args()
     
     InvIdx = InvertedIndex()
@@ -169,7 +217,47 @@ def main() -> None:
             term = tokenize_term(args.term)
             tf = InvIdx.get_tf(args.id, term)
             print(f'{args.term} {tf} {args.id}')
-            
+        case "idf":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return  
+            term = tokenize_term(args.term)
+            doc_ids = InvIdx.get_documents(term)
+            idf = math.log((len(InvIdx.docmap) + 1) / (len(doc_ids) + 1))
+            print(f"Inverse document frequency of '{args.term}': {idf:.2f}")
+        case "tfidf":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return    
+            term = tokenize_term(args.term)
+            tf = InvIdx.get_tf(args.id, term)
+            doc_ids = InvIdx.get_documents(term)
+            idf = math.log((len(InvIdx.docmap) + 1) / (len(doc_ids) + 1)) 
+            tf_idf = tf * idf
+            print(f"TF-IDF score of '{args.term}' in document '{args.id}': {tf_idf:.2f}") 
+        case "bm25idf":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return  
+            term = tokenize_term(args.term)
+            bm25idf = InvIdx.get_bm25_idf(term)           
+            print(f"BM25 IDF score of '{args.term}': {bm25idf:.2f}")
+        case "bm25tf":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return  
+            term = tokenize_term(args.term)
+            bm_25tf = InvIdx.get_bm25_tf(args.id, term, args.k1)          
+            print(f"BM25 TF score of '{args.term}' in document '{args.id}': {bm_25tf:.2f}")
+
         case _:
             parser.print_help()
 
