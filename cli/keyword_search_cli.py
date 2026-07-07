@@ -112,6 +112,21 @@ def main() -> None:
                 doc_length += self.doc_lengths[doc]            
             return doc_length/len(self.doc_lengths)
 
+        def bm25(self, doc_id, term):
+            bm25_tf = self.get_bm25_tf(doc_id, term)
+            bm25_idf = self.get_bm25_idf(term)
+            return bm25_tf * bm25_idf
+
+        def bm25_search(self, query, limit=5):
+            query_tokens = preprocess(query)
+            scores = {}
+            for doc_id in self.docmap:
+                total = 0
+                for token in query_tokens:
+                    total += self.bm25(doc_id, token)
+                scores[doc_id] = total
+            sorted_items = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+            return sorted_items[:limit]
 
         def build(self):
             data = load_movies()
@@ -184,10 +199,14 @@ def main() -> None:
     bm25_tf_parser.add_argument("k1", type=float, nargs='?', default=config.BM_K1, help="Tunable BM25 K1 parameter")
     bm25_tf_parser.add_argument("b", type=float, nargs='?', default=config.BM25_B, help="Tunable BM25 b parameter")
 
+    bm25search_parser = subparsers.add_parser("bm25search", help="Search movies using full BM25 scoring")
+    bm25search_parser.add_argument("query", type=str, help="Search query")
+
     args = parser.parse_args()
     
     InvIdx = InvertedIndex()
     stopwords = load_stopwords()
+    stopwords = process_stopwords(stopwords)
     
     match args.command:
         case "search":
@@ -196,7 +215,6 @@ def main() -> None:
             except FileNotFoundError:
                 print('Inverted index file not found within the cache')
                 return            
-            stopwords = process_stopwords(stopwords)
             query_tokens = preprocess(args.query)
             doc_ids = []
             for query_token in query_tokens:
@@ -257,6 +275,22 @@ def main() -> None:
             term = tokenize_term(args.term)
             bm_25tf = InvIdx.get_bm25_tf(args.id, term, args.k1)          
             print(f"BM25 TF score of '{args.term}' in document '{args.id}': {bm_25tf:.2f}")
+
+        case "bm25search":
+            try:  
+                InvIdx.load_from_cache()
+            except FileNotFoundError:
+                print('Inverted index file not found within the cache')
+                return  
+            scores = InvIdx.bm25_search(args.query)
+            count = 1
+            for score in scores:
+                movie = InvIdx.docmap[score[0]]
+                movie_title = movie['title']
+                print(f'{count}. ({score[0]}) {movie_title} - Score: {score[1]:.2f}')
+                count += 1
+        
+
 
         case _:
             parser.print_help()
