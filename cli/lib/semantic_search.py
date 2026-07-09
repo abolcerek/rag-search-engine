@@ -36,6 +36,23 @@ class SemanticSearch:
                 return self.embeddings
         return self.build_embeddings(documents)
 
+    def search(self, query, limit):
+        if len(self.embeddings) == 0:
+            raise ValueError("No embeddings loaded. Call 'load_or_create_embeddings' first.")
+        embedded_query = self.generate_embeddings(query)
+        list_of_cosine_similarities = []
+        for i in range(len(self.embeddings)):
+            cos_sim = cosine_similarity(embedded_query, self.embeddings[i])
+            list_of_cosine_similarities.append((cos_sim, self.documents[i]))
+        sorted_similarities = sorted(list_of_cosine_similarities, key=lambda x: x[0], reverse=True)
+        res = []
+        for i in range(limit):
+            score = sorted_similarities[i][0]
+            movie = sorted_similarities[i][1]
+            dictionary = {"score": score, "title": movie['title'], "description": movie['description']}
+            res.append(dictionary)
+        return res 
+
 
 def verify_model():
     semsearch = SemanticSearch()
@@ -65,3 +82,13 @@ def embed_query_text(query):
     print(f"Query: {query}")
     print(f"First 3 dimensions: {embedding[:3]}")
     print(f"Shape: {embedding.shape}")
+
+def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+    dot_product = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    
+    return dot_product / (norm1 * norm2)
