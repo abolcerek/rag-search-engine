@@ -1,6 +1,7 @@
 import argparse
 from lib import semantic_search
 import json
+import re
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Semantic Search CLI")
@@ -19,7 +20,18 @@ def main() -> None:
     search = subparser.add_parser("search", help="Semantic search command")
     search.add_argument("query", type=str, help="Inputted search query")
     search.add_argument("--limit", type=int, nargs='?', default=5, help="Optional limit parameter")
-    
+
+    chunk = subparser.add_parser("chunk", help="Chunk the inputted text")
+    chunk.add_argument("text", type=str, help="Inputted text to be chunked")
+    chunk.add_argument("--chunk-size", type=int, nargs="?", default=200, help="Optional chunk size parameter")
+    chunk.add_argument("--overlap", type=int, help="Parameter for chunk overlap")
+
+    semantic_chunk = subparser.add_parser("semantic_chunk", help="Semantically chunk the inputted text")
+    semantic_chunk.add_argument("text", type=str, help="Inputted text to be chunked")
+    semantic_chunk.add_argument("--max-chunk-size", type=int, nargs="?", default=4, help="Optional max chunk size parameter")
+    semantic_chunk.add_argument("--overlap", type=int, nargs="?", default=0, help="Optional overlap parameter")
+
+
     args = parser.parse_args()
 
     match args.command:
@@ -41,6 +53,37 @@ def main() -> None:
             search_results = sem_search.search(args.query, args.limit)
             for i in range(len(search_results)):
                 print(f"{i + 1}. {search_results[i]['title']} (score: {search_results[i]['score']:.4f}) \n{search_results[i]['description']}")
+        case "chunk":
+            character_length = len(args.text)
+            chunks = args.text.split()
+            print(f"Chunking {character_length} characters")
+            counter = 1
+            i = 0
+            while i < character_length:
+                list_of_chunks = chunks[i: i + args.chunk_size]
+                if len(list_of_chunks) == 0:
+                    break
+                print(f"{counter}. {" ".join(list_of_chunks)}")
+                counter += 1
+                i += args.chunk_size - args.overlap
+
+        case "semantic_chunk":
+            list_of_sentences = re.split(r"(?<=[.!?])\s+", args.text)
+            print(f"Semantically chunking {len(args.text)} characters")
+            counter = 1
+            i = 0
+            prev_last_idx = -1
+            while i < len(list_of_sentences):
+                list_of_chunks = list_of_sentences[i : i + args.max_chunk_size]
+                current_last_idx = i + len(list_of_chunks) - 1
+                if current_last_idx <= prev_last_idx:
+                    break
+                if len(list_of_chunks) == 0:
+                    break
+                print(f"{counter}. {" ".join(list_of_chunks)}")
+                prev_last_idx = current_last_idx
+                counter += 1
+                i += args.max_chunk_size - args.overlap
         case _:
             parser.print_help()
 
