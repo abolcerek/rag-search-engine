@@ -31,6 +31,13 @@ def main() -> None:
     semantic_chunk.add_argument("--max-chunk-size", type=int, nargs="?", default=4, help="Optional max chunk size parameter")
     semantic_chunk.add_argument("--overlap", type=int, nargs="?", default=0, help="Optional overlap parameter")
 
+    embed_chunk = subparser.add_parser("embed_chunks", help="Embed movie documents into chunks")
+
+    search_chunk = subparser.add_parser("search_chunked", help="Search the chunked documents")
+    search_chunk.add_argument("text", type=str, help="Inputted text to be searched")
+    search_chunk.add_argument("--limit", type=int, nargs="?", default=5, help="Optional limit parameter for search")
+
+
 
     args = parser.parse_args()
 
@@ -84,6 +91,25 @@ def main() -> None:
                 prev_last_idx = current_last_idx
                 counter += 1
                 i += args.max_chunk_size - args.overlap
+        case "embed_chunks":
+            movies = []
+            with open('./data/movies.json', 'r') as file:
+                data = json.load(file)
+            movies.extend(data['movies'])
+            chunk_sem_search = semantic_search.ChunkedSemanticSearch()
+            embeddings = chunk_sem_search.load_or_create_chunk_embeddings(movies)
+            print(f"Generated {len(embeddings)} chunked embeddings")
+        case "search_chunked":
+            movies = []
+            with open('./data/movies.json', 'r') as file:
+                data = json.load(file)
+            movies.extend(data['movies'])
+            chunk_sem_search = semantic_search.ChunkedSemanticSearch()
+            chunk_sem_search.load_or_create_chunk_embeddings(movies)
+            results = chunk_sem_search.search_chunks(args.text, args.limit)
+            for i, result in enumerate(results):
+                print(f"\n{i}. {result["title"]} (score: {result["score"]:.4f})")
+                print(f"    {result["document"]}...")
         case _:
             parser.print_help()
 

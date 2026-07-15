@@ -2,6 +2,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 import json
 import os
+import re
 
 class SemanticSearch:
     def __init__(self):
@@ -53,6 +54,81 @@ class SemanticSearch:
             res.append(dictionary)
         return res 
 
+class ChunkedSemanticSearch(SemanticSearch):
+    def __init__(self):
+        super().__init__()
+        self.chunk_embeddings = None
+        self.chunk_metadata = None
+
+    def build_chunk_embeddings(self, documents): 
+        self.documents = documents
+        chunks = []
+        chunks_metadata = []
+        for i, document in enumerate(self.documents):
+            self.document_map[document['id']] = document
+            if len(document['description']) == 0:
+                continue
+            sem_chunks = semantic_chunk(document['description'], 4, 1)
+            for chunk_index, chunk_text in enumerate(sem_chunks):
+                chunks.append(chunk_text)
+                chunks_metadata.append({"movie_idx": i,  "chunk_idx": chunk_index, "total_chunks": len(sem_chunks)})
+        self.chunk_embeddings = self.model.encode(chunks)
+        np.save('cache/chunk_embeddings', self.chunk_embeddings)
+        self.chunk_metadata = {"chunks": chunks_metadata, "total_chunks": len(chunks)}
+        with open ('cache/chunk_metadata.json', 'w') as file:
+            json.dump({"chunks": chunks_metadata, "total_chunks": len(chunks)}, file, indent=2)
+        return self.chunk_embeddings
+
+    def load_or_create_chunk_embeddings(self, documents):
+        self.documents = documents
+        for document in self.documents:
+            self.document_map[document['id']] = document
+        if os.path.exists('cache/chunk_embeddings.npy') and os.path.exists('cache/chunk_metadata.json'):
+            self.chunk_embeddings = np.load('cache/chunk_embeddings.npy')
+            with open('cache/chunk_metadata.json', 'rb') as file:
+                chunk_metadata = json.load(file)
+                self.chunk_metadata = chunk_metadata
+            return self.chunk_embeddings
+        return self.build_chunk_embeddings(documents)
+
+    def search_chunks(self, query, limit=10):
+        embedded_query = self.generate_embeddings(query)
+        chunk_scores = []
+        for i, chunk in enumerate(self.chunk_embeddings):
+            cos_sim = cosine_similarity(embedded_query, self.chunk_embeddings[i])
+            chunks = self.chunk_metadata["chunks"]
+            chunk_scores.append({"chunk_idx": chunks[i]["chunk_idx"], "movie_idx": chunks[i]["movie_idx"], "score": cos_sim})
+        movies_scores = {}
+        for i, chunk in enumerate(chunk_scores):
+            if chunk['movie_idx'] not in movies_scores or chunk['score'] > movies_scores[chunk['movie_idx']]:
+                movies_scores[chunk['movie_idx']] = chunk['score']
+        sorted_scores = sorted(movies_scores.items(), key= lambda item : item[1], reverse=True)
+        res = []
+        for index, (key, value) in enumerate(sorted_scores):
+            if index == limit:
+                return res
+            document = self.documents[key]
+            res.append(format_search_result(document['id'], document['title'], document['description'][:100], value))
+        return res 
+        
+
+def semantic_chunk(
+    text: str,
+    max_chunk_size: int = 5,
+    overlap: int = 1,
+) -> list[str]:
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    chunks = []
+    i = 0
+    n_sentences = len(sentences)
+    while i < n_sentences:
+        chunk_sentences = sentences[i : i + max_chunk_size]
+        if chunks and len(chunk_sentences) <= overlap:
+            break
+        chunks.append(" ".join(chunk_sentences))
+        i += max_chunk_size - overlap
+    return chunks
+
 
 def verify_model():
     semsearch = SemanticSearch()
@@ -87,8 +163,30 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
     dot_product = np.dot(vec1, vec2)
     norm1 = np.linalg.norm(vec1)
     norm2 = np.linalg.norm(vec2)
-
     if norm1 == 0 or norm2 == 0:
         return 0.0
-    
     return dot_product / (norm1 * norm2)
+
+
+def format_search_result(
+    doc_id: int, title: str, document: str, score: float, **metadata: Any
+) -> SearchResult:
+    """Create standardized search result
+
+    Args:
+        doc_id: Document ID
+        title: Document title
+        document: Display text (usually short description)
+        score: Relevance/similarity score
+        **metadata: Additional metadata to include
+
+    Returns:
+        Dictionary representation of search result
+    """
+    return {
+        "id": doc_id,
+        "title": title,
+        "document": document,
+        "score": round(score, 2),
+        "metadata": metadata if metadata else {},
+    }
