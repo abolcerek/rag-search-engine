@@ -75,22 +75,11 @@ def main() -> None:
                 i += args.chunk_size - args.overlap
 
         case "semantic_chunk":
-            list_of_sentences = re.split(r"(?<=[.!?])\s+", args.text)
-            print(f"Semantically chunking {len(args.text)} characters")
-            counter = 1
-            i = 0
-            prev_last_idx = -1
-            while i < len(list_of_sentences):
-                list_of_chunks = list_of_sentences[i : i + args.max_chunk_size]
-                current_last_idx = i + len(list_of_chunks) - 1
-                if current_last_idx <= prev_last_idx:
-                    break
-                if len(list_of_chunks) == 0:
-                    break
-                print(f"{counter}. {" ".join(list_of_chunks)}")
-                prev_last_idx = current_last_idx
-                counter += 1
-                i += args.max_chunk_size - args.overlap
+            chunks = semantic_search.semantic_chunk(args.text)
+            if len(chunks) == 0:
+                return
+            for i, chunk in enumerate(chunks):
+                print(f"{i + 1}. {chunk}")
         case "embed_chunks":
             movies = []
             with open('./data/movies.json', 'r') as file:
@@ -108,7 +97,7 @@ def main() -> None:
             chunk_sem_search.load_or_create_chunk_embeddings(movies)
             results = chunk_sem_search.search_chunks(args.text, args.limit)
             for i, result in enumerate(results):
-                print(f"\n{i}. {result["title"]} (score: {result["score"]:.4f})")
+                print(f"\n{i + 1}. {result["title"]} (score: {result["score"]:.4f})")
                 print(f"    {result["document"]}...")
         case _:
             parser.print_help()
