@@ -68,8 +68,14 @@ class HybridSearch():
                 results[result["id"]]["semantic_rank"] = i + 1
                 results[result["id"]]["document"] = self.idx.docmap[result["id"]]
         for key, value in results.items():
-            rrf_bm25 = rrf_score(value["bm25_rank"], k)
-            rrf_semantic = rrf_score(value["semantic_rank"], k)
+            if "bm25_rank" in value:
+                rrf_bm25 = rrf_score(value["bm25_rank"], k)
+            else:
+                rrf_bm25 = 0
+            if "semantic_rank" in value :
+                rrf_semantic = rrf_score(value["semantic_rank"], k)
+            else:
+                rrf_semantic = 0
             results[key]["rrf_score"] = rrf_bm25 + rrf_semantic
         sorted_scores = sorted(results.items(), key=lambda item: item[1]["rrf_score"], reverse=True)
         return sorted_scores[:limit]
