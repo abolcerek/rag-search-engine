@@ -49,11 +49,30 @@ class HybridSearch():
             hyb_score = hybrid_score(value["bm25_score"], value["semantic_score"], alpha)
             results[key]["hybrid_score"] = hyb_score
         sorted_scores = sorted(results.items(), key=lambda item: item[1]["hybrid_score"], reverse=True)
-        return sorted_scores[:limit]
-        
+        return sorted_scores[:limit]      
 
     def rrf_search(self, query: str, k: int, limit: int = 10):
-        raise NotImplementedError("RRF hybrid search is not implemented yet.")
+        bm25_results = self._bm25_search(query, limit * 500) #doc id at score[0]
+        sem_results = self.semantic_search.search_chunks(query, limit * 500) #doc id at score["id"]
+        results = {}
+        for i, result in enumerate(bm25_results):
+            if result[0] not in results:
+                document = self.idx.docmap[result[0]]
+                results[result[0]] = {"bm25_rank": i + 1}
+                results[result[0]]["document"] = document
+        for i, result in enumerate(sem_results):
+            if result["id"] not in results:
+                results[result["id"]] = {"semantic_rank": i + 1}
+                results[result["id"]]["document"] = self.idx.docmap[result["id"]]
+            else:
+                results[result["id"]]["semantic_rank"] = i + 1
+                results[result["id"]]["document"] = self.idx.docmap[result["id"]]
+        for key, value in results.items():
+            rrf_bm25 = rrf_score(value["bm25_rank"], k)
+            rrf_semantic = rrf_score(value["semantic_rank"], k)
+            results[key]["rrf_score"] = rrf_bm25 + rrf_semantic
+        sorted_scores = sorted(results.items(), key=lambda item: item[1]["rrf_score"], reverse=True)
+        return sorted_scores[:limit]
 
 
 def normalize(values):
@@ -72,3 +91,6 @@ def normalize(values):
 
 def hybrid_score(bm25_score: float, semantic_score: float, alpha: float = 0.5) -> float:
     return alpha * bm25_score + (1 - alpha) * semantic_score
+
+def rrf_score(rank: int, k: int = 60) -> float:
+    return 1 / (k + rank)

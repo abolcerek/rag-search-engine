@@ -14,6 +14,11 @@ def main() -> None:
     weighted_search.add_argument("text", type=str, help="Inputted query")
     weighted_search.add_argument("--alpha", type=float, nargs="?", default= 0.5, help="Optional alpha parameter")
     weighted_search.add_argument("--limit", type=int, nargs="?", default=25, help="Optional limit parameter")
+
+    rrf_search = subparser.add_parser("rrf-search", help="Reciprocal Rank Fusion search")
+    rrf_search.add_argument("text", type=str, help="Inputted query used for search")
+    rrf_search.add_argument("-k", type=int, nargs="?", default=60, help="Optional k parameter")
+    rrf_search.add_argument("--limit", type=int, nargs="?", default=5, help="Optional limit paramter")
  
 
     args = parser.parse_args()
@@ -35,6 +40,16 @@ def main() -> None:
             results = HybridSearch.weighted_search(args.text, args.alpha, args.limit)
             for i, (doc_id, result) in enumerate(results):
                 print(f'{i + 1}. {result['document']['title']}\n Hybrid Score: {result['hybrid_score']:.3f}\n BM25: {result['bm25_score']:.3f}, Semantic: {result['semantic_score']:.3f}\n {result['document']['description'][:description_limit]}...\n')
+        case "rrf-search":
+            movies = []
+            with open('./data/movies.json', 'r') as file:
+                data = json.load(file)
+            movies.extend(data['movies'])
+            HybridSearch = hybrid_search.HybridSearch(movies)
+            results = HybridSearch.rrf_search(args.text, args.k, args.limit)
+            for i, (doc_id, result) in enumerate(results):
+                print(f'{i + 1}. {result['document']['title']}\n RRF Score: {result['rrf_score']:.3f}\n BM25 Rank: {result['bm25_rank']}, Semantic Rank: {result['semantic_rank']}\n {result['document']['description'][:description_limit]}...\n')
+        
         case _:
             parser.print_help()
 
