@@ -17,22 +17,39 @@ class HybridSearch():
             self.idx.save()
     
     def _bm25_search(self, query: str, limit: int):
-        self.idx.load()
+        self.idx.load_from_cache()
         return self.idx.bm25_search(query, limit)
 
     def weighted_search(self, query: str, alpha: float, limit: int = 5):
-        raise NotImplementedError("Weighted search is not implemented yet")
-        # bm25_results = self._bm25_search(query, limit * 500)
-        # sem_results = self.semantic_search.search_chunks(query, limit * 500)
-        # bm_25_scores = []
-        # sem_scores = []
-        # for score in bm25_results:
-        #     bm_25_scores.append(score[1])
-        # for result in sem_results:
-        #     sem_scores.append(result["score"])
-        # norm_bm25_scores = normalize(bm_25_scores)
-        # norm_sem_scores = normalize(sem_scores)
-        # results = []
+        bm25_results = self._bm25_search(query, limit * 500) #doc id at score[0]
+        sem_results = self.semantic_search.search_chunks(query, limit * 500) #doc id at score["id"]
+        bm_25_scores = []
+        sem_scores = []
+        results = {}
+        hybrid_scores = []
+        for score in bm25_results:
+            bm_25_scores.append(score[1])
+        for result in sem_results:
+            sem_scores.append(result["score"])
+        norm_bm25_scores = normalize(bm_25_scores)
+        norm_sem_scores = normalize(sem_scores)
+        for i, result in enumerate(bm25_results):
+            if result[0] not in results:
+                document = self.idx.docmap[result[0]]
+                results[result[0]] = {"bm25_score": norm_bm25_scores[i], "semantic_score": 0.0}
+                results[result[0]]["document"] = document
+        for i, result in enumerate(sem_results):
+            if result["id"] not in results:
+                results[result["id"]] = {"bm25_score": 0.0,"semantic_score": norm_sem_scores[i]}
+                results[result["id"]]["document"] = self.idx.docmap[result["id"]]
+            else:
+                results[result["id"]]["semantic_score"] = norm_sem_scores[i]
+                results[result["id"]]["document"] = self.idx.docmap[result["id"]]
+        for key, value in results.items():
+            hyb_score = hybrid_score(value["bm25_score"], value["semantic_score"], alpha)
+            results[key]["hybrid_score"] = hyb_score
+        sorted_scores = sorted(results.items(), key=lambda item: item[1]["hybrid_score"], reverse=True)
+        return sorted_scores[:limit]
         
 
     def rrf_search(self, query: str, k: int, limit: int = 10):
@@ -52,3 +69,6 @@ def normalize(values):
         score = numerator / denominator 
         res.append(score)
     return res
+
+def hybrid_score(bm25_score: float, semantic_score: float, alpha: float = 0.5) -> float:
+    return alpha * bm25_score + (1 - alpha) * semantic_score

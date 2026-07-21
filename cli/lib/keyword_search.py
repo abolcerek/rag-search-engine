@@ -131,6 +131,8 @@ def tokenization(string):
     return tokens
 
 def remove_stop_words(words):
+    raw_stopwords = load_stopwords()
+    stopwords = process_stopwords(raw_stopwords)
     res = []
     for word in words:
         if word not in stopwords:
